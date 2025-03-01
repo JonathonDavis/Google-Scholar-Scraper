@@ -5,11 +5,25 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import time
 import os
+import random
+from urllib.parse import quote_plus
 
 # Create default output directory
 DEFAULT_OUTPUT_DIR = os.path.join(os.getcwd(), "Output")
 if not os.path.exists(DEFAULT_OUTPUT_DIR):
     os.makedirs(DEFAULT_OUTPUT_DIR)
+
+# List of User-Agents to rotate through
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/91.0.864.59 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
+]
 
 def scrape_scholar_articles(query, num_pages):
     articles = []
@@ -150,3 +164,147 @@ label_status.pack()
 
 # Run the main window loop
 window.mainloop()
+
+class ScholarScraper:
+    def __init__(self):
+        # ... existing init code ...
+        self.stats['blocked_requests'] = 0  # Add new statistic
+        # ... rest of init ...
+
+    # ... existing methods until scrape_scholar ...
+
+    def get_random_wait_time(self):
+        """Get a random wait time between requests"""
+        # Base delay between 5 and 10 seconds
+        base_delay = random.uniform(5, 10)
+        
+        # 20% chance of longer delay (15-30 seconds)
+        if random.random() < 0.2:
+            base_delay = random.uniform(15, 30)
+            
+        # 5% chance of very long delay (45-90 seconds)
+        if random.random() < 0.05:
+            base_delay = random.uniform(45, 90)
+            
+        return base_delay
+
+    def make_request(self, url, retry_count=0, max_retries=3):
+        """Make a request with random delays and retry logic"""
+        if retry_count >= max_retries:
+            return None
+
+        # Random User-Agent
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'TE': 'Trailers',
+            'DNT': '1'  # Do Not Track header
+        }
+
+        # Random wait before request
+        wait_time = self.get_random_wait_time()
+        self.progress_var.set(f"Waiting {wait_time:.1f} seconds before next request...")
+        self.window.update()
+        time.sleep(wait_time)
+
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                return response
+            elif response.status_code == 429 or response.status_code == 403:
+                self.stats['blocked_requests'] += 1
+                # Exponential backoff with randomization
+                wait_time = (2 ** retry_count) * random.uniform(20, 30)
+                self.progress_var.set(f"Access blocked. Waiting {wait_time:.1f} seconds before retry...")
+                self.window.update()
+                time.sleep(wait_time)
+                return self.make_request(url, retry_count + 1, max_retries)
+            else:
+                return None
+
+        except Exception as e:
+            print(f"Request error: {str(e)}")
+            return None
+
+    def scrape_scholar(self):
+        articles = []
+        seen_titles = set()
+        
+        # Get all non-empty keywords
+        keywords = ' '.join(entry.get() for entry in self.keywords if entry.get().strip())
+        
+        if not keywords:
+            messagebox.showerror("Error", "Please enter at least one keyword")
+            return []
+        
+        try:
+            num_pages = int(self.num_pages.get())
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of pages")
+            return []
+        
+        self.progress_bar['maximum'] = num_pages
+        page = 0
+        
+        while page < num_pages:
+            # Encode keywords properly
+            encoded_keywords = quote_plus(keywords)
+            url = f"https://scholar.google.com/scholar?start={page*10}&q={encoded_keywords}&hl=en&as_sdt=0,5"
+            
+            self.progress_var.set(f"Fetching page {page + 1}...")
+            self.progress_bar['value'] = page + 1
+            self.window.update()
+            
+            response = self.make_request(url)
+            if response is None:
+                messagebox.showerror("Error", "Failed to fetch results after multiple retries")
+                break
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            results = soup.find_all("div", class_="gs_ri")
+            
+            if not results:
+                print("No results found on this page.")
+                if page == 0:
+                    messagebox.showwarning("Warning", "No results found for the given keywords.")
+                else:
+                    messagebox.showinfo("Info", "No more results available.")
+                break
+            
+            # ... rest of the scraping logic ...
+            
+            # Add some randomization to the page progression
+            if random.random() < 0.1:  # 10% chance of longer delay between pages
+                extra_delay = random.uniform(10, 20)
+                self.progress_var.set(f"Adding extra delay of {extra_delay:.1f} seconds...")
+                self.window.update()
+                time.sleep(extra_delay)
+            
+            page += 1
+        
+        if self.stats['blocked_requests'] > 0:
+            messagebox.showinfo("Access Blocks", 
+                              f"Encountered {self.stats['blocked_requests']} access blocks during scraping.\n"
+                              "Consider reducing the number of pages or increasing delays between requests.")
+        
+        return articles
+
+    def update_stats(self):
+        stats_text = f"""
+Articles Found: {self.stats['total_found']}
+Excluded - No Full Text: {self.stats['excluded_no_fulltext']}
+Excluded - Non-English: {self.stats['excluded_non_english']}
+Excluded - Before 2018: {self.stats['excluded_old_date']}
+Excluded - Duplicates: {self.stats['excluded_duplicate']}
+Access Blocks: {self.stats['blocked_requests']}
+Included Articles: {self.stats['included_final']}
+        """
+        self.stats_text.delete(1.0, tk.END)
+        self.stats_text.insert(tk.END, stats_text)
+
+    # ... rest of the class methods ...
